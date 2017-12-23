@@ -1,0 +1,386 @@
+---
+title: "684 mideterm project"
+author: "Yaqi Huang"
+date: "2017/12/19"
+output:
+  word_document: default
+  html_document:
+    df_print: paged
+---
+
+# Introduction
+
+Since last time, I was trying to buy some wines to celebrate the birthday of a friend of mine, I realized that I am definitely not an expert in knowledge related to wines. I was impressed by reading the decription written down. Also, seemes to be a common sense that the higher the rate the wine has been graded, the higher the price it would be. But that is not always the case. The country it origined, the genre etc, could all be the important factors that would affect the price of the wine.
+
+Then I found this dataset, which relates to wine and contains the following fields:
+
+-Points: the number of points WineEnthusiast rated the wine on a scale of 1-100 (though they say they only post reviews for wines that score >=80)
+-Title: the title of the wine review, which often contains the vintage if you're interested in extracting that feature
+-Variety: the type of grapes used to make the wine (ie Pinot Noir)
+-Description: a few sentences from a sommelier describing the wine's taste, smell, look, feel, etc.
+-Country: the country that the wine is from
+-Province: the province or state that the wine is from
+-Region 1: the wine growing area in a province or state (ie Napa)
+-Region 2: sometimes there are more specific regions specified within a wine growing area (ie Rutherford inside the Napa Valley), but this value can sometimes be blank
+-Winery: the winery that made the wine
+-Designation: the vineyard within the winery where the grapes that made the wine are from
+-Price: the cost for a bottle of the wine
+-Taster Name: name of the person who tasted and reviewed the wine
+-Taster Twitter Handle: Twitter handle for the person who tasted and reviewed the wine
+
+The variables in this dataset that I am interested in and will use for the further analysis are followings:
+
+- Points
+- Variety
+- Description
+- Country
+- Province
+- Price
+
+Because the dataset is enormous and for variable "Variety", there are so many categories involved, therefore, I limited the data to the top20 most reviewed varieties during the data clean process. 
+
+I have posted questions for myself and will be trying to answer by different methods, EDA and regressions. 
+
+For the EDA session, I would try to figure out:
+
+- What is the distribution of prices awarded for the most reviewed varieties?
+- Is there any relationship appeared between the points and price of the wine?
+- What are the most often used words for description of the wine?
+
+To do the above, I would produce several types of EDA and wordcould.
+
+For the regression session:
+
+- What is the best possible regression to estimate the price of the wine from the given variables?
+
+To answer this question, I would try to fit lots of models, include linear models and multilevel regressions.
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r}
+
+pacman::p_load(tidyverse,
+ggplot2,
+ggthemes,
+corrplot,
+lubridate,
+RColorBrewer,
+gridExtra,
+scales,
+wordcloud,
+ngram,
+data.table,
+tidyr,
+lme4,
+merTools,
+plotly,
+ggjoy,
+tm,
+SnowballC,
+wordcloud,
+RColorBrewer)
+
+```
+
+
+# Data Clean and Organize
+
+```{r}
+
+wine <- read.csv("winemag-data-130k-v2.csv")
+wine <- wine[!is.na(wine$price), ]
+
+unique_vals <- lapply(wine, unique)
+sapply(unique_vals, length)
+
+```
+
+Some overview of this dataset that I am interested in:
+
+- The wines listed in the dataset come from 43 unique countries and 423 provinces.
+- There are 698 varieties presented in the dataset.
+
+As displayed above, the number of variety types are enormous, for the EDA session, I would be only focused on the top20 most reviewed variety as mentioned.
+
+
+# EDA
+
+
+```{r}
+
+top20df <- wine %>%
+  group_by(variety) %>%
+  summarise(count = n())%>%
+  arrange(desc(count))
+
+top20df <- top20df[1:20,1:2]
+
+top20df
+
+top20 <- top20df$variety  
+
+wine2 <- subset(wine, variety %in% top20)
+
+wine2$wine_type <- ifelse(wine2$variety == "Chardonnay" | wine2$variety == "Riesling" | wine2$variety == "Sauvignon Blanc" | wine2$variety == "White Blend" | wine2$variety == "Sparkling Blend" | wine2$variety == "Pinot Gris", "White Wine", "Red Wine")
+
+wine2 %>%
+  group_by(variety, wine_type) %>%
+  summarise(n=n(),
+            average.points = mean(points),
+            average.price = mean(price)) %>%
+  ggplot(aes(x=average.points, y= average.price, size = n, colour = wine_type))+
+  geom_point()+
+  scale_color_manual(values = c("red", "pink"))
+
+```
+
+Something to be noted here that, after limit the dataset to the top20 most varieties reviewed, I created a new column named "wine_type", which I put the top20 most varieties viewed into either "Red Wine" or "White Wine". To be noticed here, I put "Rosé" under "Red Wine".
+
+The top20 most varieties reviewed are displayed as table above and the correponding count numbers.
+
+The plot above shown the average points against average price for the top20 most varieties reviewed, and color represents the different wine type that I classified, and the bigger the dot, the larger the corresponding count.
+
+
+```{r}
+
+g1 <- ggplot(data = subset(wine2, wine_type == "Red Wine"), aes(x=log(price), y=variety))+
+  geom_joy2(bandwidth = 0.1,fill = "red")
+
+g2 <- ggplot(data = subset(wine2, wine_type == "White Wine"), aes(x=log(price), y=variety))+
+  geom_joy2(bandwidth = 0.1,fill = "pink")
+
+grid.arrange(g1, g2, nrow = 1)
+
+```
+
+The above two plots could be used to answer the question of the distribution of the top20 most varieties reviewed. We could clear see the peak and the tails because of the closed polygon shape, but I do not think it clearly follows a normal distribution. Another point to mention from the above plots is that although there is some variation occured in the mean price for the red wine, but not big variation for the white wine. But possible because that the most varieties in top20 are categorized as red wine.
+
+
+
+```{r}
+
+g3 <- ggplot(data = subset(wine2, wine_type == "Red Wine"), aes(x=points, y= price))+
+  geom_point(colour="red")+
+  scale_y_log10()+
+  geom_smooth(method = "lm",colour = "black")
+
+g4 <- ggplot(data = subset(wine2, wine_type == "White Wine"), aes(x=points, y= price))+
+  geom_point(colour="pink")+
+  scale_y_log10()+
+  geom_smooth(method = "lm",colour = "black")
+
+grid.arrange(g3, g4, nrow=1)
+
+```
+
+The above plots illustarte whether there is a relationship between the points awarded and the price of a given wine. The answer is yes, not to be so surprised. We could clearly see there is a positive relationship between the points awarded and the price, also pointed out by the trend line. But to be precise, what is the corresponding change for the price for a given increase in one unit for point, we could examine this in the regression below.
+
+
+```{r}
+
+#Pinot Noir
+
+pinot <- subset(wine2,variety == "Pinot Noir")
+description <- Corpus(VectorSource(pinot$description))
+description <- tm_map(description,content_transformer(tolower))
+description <- tm_map(description,removeNumbers)
+description <- tm_map(description,removeWords,stopwords("english"))
+description <- tm_map(description,removeWords,c("pinot","noir","drink","wine","flavors"))
+description <- tm_map(description,removePunctuation)
+description <- tm_map(description,stripWhitespace)
+#description <- tm_map(description,stemDocument)
+
+dtm <- TermDocumentMatrix(description)
+m <- as.matrix(dtm)
+v <- sort(rowSums(m),decreasing=TRUE)
+d <- data.frame(word = names(v),freq=v)
+head(d, 10)
+
+set.seed(1234)
+wordcloud(words = d$word, freq = d$freq, min.freq = 1,
+          max.words=100, random.order=FALSE, rot.per=0.35, 
+          colors=brewer.pal(8, "Dark2"))
+
+```
+
+As from above, we got that the top most variety viewed is Pinot Noir in this dataset, therefor I am interested in that what kind of words have been written on the description in common, it could be a possible reason for a better reviewed as well.
+
+From the wordcloud we could see that, most of the words used could cheer people up and are on the positive side of the language. Also there is a great number of fruits names used as well, which could possibly give the buyers a feeling of being natural when reading the description.
+
+
+# Regression
+
+## Linear Model with Mixed Effects
+
+```{r}
+
+reg1 <- lm(log(price)~points,data = wine2)
+reg2 <- lm(log(price)~points + variety,data = wine2)
+reg3 <- lm(log(price)~country + points + variety,data = wine2)
+reg4 <- lm(log(price)~country + points + variety + variety:points,data = wine2)
+
+summary(reg1)$r.squared
+summary(reg2)$r.squared
+summary(reg3)$r.squared
+summary(reg4)$r.squared
+
+```
+
+For the linear models, I strated my regression with the most simple form by just adding one variable to the right-side of the regression, and developed the model by adding new variables and interaction term.
+
+By comparing the R-squared value, I concluded that reg4 is the most fitted model within these linear models, althougn the R-squared value is 0.509 which is not considerably high, which indicates that the model explains 51% of the variations of the dataset.
+
+
+```{r}
+
+plot(fitted(reg4),resid(reg4),xlab = "fitted",ylab = "residuals",main = "Residual Plot of Reg4")
+
+abline(0,0)
+
+```
+
+The above is the residual plot of reg4. Most of the points are balanced distributed on the top and bottom side of the line cross zero, although there are a few points which are pretty away from zero. Personally this residual plot looks pretty good to me, and indicates that the model reg4 is pretty good fit.
+
+
+## Multilevel regression
+
+### Fit a varying intercept model with lmer
+
+```{r,warning=FALSE}
+
+reg5 <- lmer(log(price)~(1 | variety) + (1 | country),data = wine2)
+summary(reg5)
+
+```
+
+The above model was created by using the fixed effect “points” to predict price, controlling for by-variety and by-country variability.
+
+From the random effects output, the sd column measures of how much variability in the dependent measure that is due to the random effects "Variety" and "Country". “Residual” which stands for the variability that’s not due to the random effects. 
+
+From the fixed effects output, the coefficient for points is 5.4, which indicates that a positive 5 times change in price if the points increase by one unit.
+
+```{r}
+
+reg6 <- lmer(log(price)~points + (1 | variety) + (1 | country),data = wine2)
+summary(reg6)
+
+```
+
+I developed the model by adding a fixed effect term "points". Note that compared to our earlier model without the fixed effect "points", the variation that’s associated with the random effect “Variety” and "Country" dropped considerably. This is because the variation that’s due to points was confounded with the variation that’s due to variety and country. The model didn’t know about points, creating relatively larger residuals. Now that we have added the fixed effect of points, we have shifted a large amount of the variance that was previously in the random effects component to the fixed effects component
+
+From the fixed effects output, the coefficient for points is 0.117, which indicates that a positive 11.7% change in price if the points increase by one unit.
+
+```{r}
+
+reg7 <- lmer(log(price)~points + (1 | variety) + (1 | country/province),data = wine2)
+summary(reg7)
+
+```
+
+For the above regression, I fitted the nested group effect terms. Here the (1|country/province) says that we want to fit a mixed effect term for varying intercepts 1| by country, and for province that are nested within country.
+
+For the random effects output, there is still a shift in variance that was in country and variety to a new added random effect term.
+
+From the fixed effects output, there is still a 11% positive change in price if the points increase by one unit.
+
+```{r}
+
+AIC(reg5,reg6,reg7)
+
+```
+
+To determine which is the best model, I compared the AIC, and concluded that reg7 is most fitted as it has the lowest AIC value.
+
+To check whether the model did develop or not, I conducted hypothesis test as followings:
+
+```{r}
+
+reg.intercept.null <- lmer(log(price)~(1 | variety) + (1 | country),data = wine2, REML = FALSE)
+reg.intercept.model <- lmer(log(price)~points + (1 | variety) + (1 | country/province),data = wine2, REML = FALSE)
+
+anova(reg.intercept.null,reg.intercept.model)
+
+pchisq(44701, df = 2, lower.tail = FALSE)
+
+```
+
+The results from likelihood ratio test indicated significance, as p-value is very small, with sufficient decimals, could be extremely close to 0. Conclude that the null hypothesis is rejected, that the likelihood of two models are not equivalent. reg7 appeared to be a better model.
+
+```{r}
+
+plot(fitted(reg7),resid(reg7),xlab = "fitted",ylab = "residuals",main = "Residual Plot of Reg7")
+
+abline(0,0)
+
+```
+
+From the residual plot above, which indicates the model is good, cause the points are balanced distributed around zero. Which matched the output from the above regression, the residual which stands for the variability that’s not due to the random effects is pretty low. 
+
+
+###Fit a varying slope model with lmer
+
+```{r,warning=FALSE}
+
+reg8 <- lmer(log(price)~points + (1 + points | country/province),data = wine2, REML = FALSE)
+summary(reg8)
+
+```
+
+The notation “(1+points|country/province)” means that the model is expected to  differ baseline-levels of price (the intercept, represented by 1) as well as differ country, and for province that are nested within country.
+
+
+```{r,warning=FALSE}
+
+reg9 <- lmer(log(price)~points + (1 | variety) + (1 + points | country/province),data = wine2, REML = FALSE)
+summary(reg9)
+
+```
+
+For the random effect output, the variance of all the terms are extremly large, and the residual is huge.
+
+For the fixed effect output, the coefficient of points is 0.109, which indicates a positive change in points would lead to 10.9% increase in the price.
+
+
+```{r}
+
+AIC(reg8,reg9)
+
+```
+
+By comparing AIC, concluded that reg9 is most fitted as it has the lowest AIC value.
+
+To check whether the model did develop or not, I conducted hypothesis test as followings:
+
+```{r}
+
+anova(reg8,reg9)
+
+pchisq(9737.8, df = 1, lower.tail = FALSE)
+
+```
+
+As p-value is extremely close to 0 in this case. Conclude that the null hypothesis is rejected, that the likelihood of two models are not equivalent. reg9 appeared to be a better model.
+
+```{r}
+
+plot(fitted(reg9),resid(reg9),xlab = "fitted",ylab = "residuals",main = "Residual Plot of Reg9")
+
+abline(0,0)
+
+```
+
+From the residual plot above, which again indicate the model is good, cause the points are balanced distributed around zero. Which matched the output from the above regression, the residual which stands for the variability that’s not due to the random effects from the output is low. 
+
+
+
+
+# Conclusion
+
+Before I have made this final report, I tried several regressions, but I found the data has some kind of right-skewness which made the residual plots have many outliers shown, and led me to a wrong conclusion. Therefore I decided to take log for the variable price, to make it better fit with the models. But there is still some limitations of the data, that More relevant variables are required when exploring the regression on the price of wines.
+
+For my future exploration of this dataset, I would divide the dataset into training and testing, to better test whether the regressions and models I have chosen work with the dataset or not.
+
